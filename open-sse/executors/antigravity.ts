@@ -93,10 +93,12 @@ export class AntigravityExecutor extends BaseExecutor {
           role = "user";
         }
 
-        // Strip thought parts (no valid signature -> provider rejects).
-        // Also drop entries that become empty after filtering, which can trigger
-        // 400 invalid argument on Gemini 3 Flash through Antigravity.
-        const parts = c.parts?.filter((p) => !p.thought && !p.thoughtSignature) || [];
+        const hasFunctionCall = c.parts?.some((p) => p.functionCall) || false;
+
+        // Antigravity rejects synthetic thought text, but Gemini 3+ requires any
+        // returned thoughtSignature metadata to survive model tool-call turns.
+        const parts =
+          c.parts?.filter((p) => !p.thought && (hasFunctionCall || !p.thoughtSignature)) || [];
         return { ...c, role, parts };
       }) || [];
 
@@ -236,7 +238,11 @@ export class AntigravityExecutor extends BaseExecutor {
           const { done, value } = await Promise.race([
             reader.read(),
             new Promise<never>((_, reject) =>
-              timeout.addEventListener("abort", () => reject(new Error("SSE collection timed out")), { once: true })
+              timeout.addEventListener(
+                "abort",
+                () => reject(new Error("SSE collection timed out")),
+                { once: true }
+              )
             ),
           ]);
           if (done) break;
@@ -271,7 +277,10 @@ export class AntigravityExecutor extends BaseExecutor {
             }
           }
           if (candidate?.finishReason) {
-            finishReason = candidate.finishReason.toLowerCase() === "stop" ? "stop" : candidate.finishReason.toLowerCase();
+            finishReason =
+              candidate.finishReason.toLowerCase() === "stop"
+                ? "stop"
+                : candidate.finishReason.toLowerCase();
           }
           if (parsed?.response?.usageMetadata) {
             const um = parsed.response.usageMetadata;
@@ -330,12 +339,7 @@ export class AntigravityExecutor extends BaseExecutor {
       const url = this.buildUrl(model, upstreamStream, urlIndex);
       const headers = this.buildHeaders(credentials, upstreamStream);
       mergeUpstreamExtraHeaders(headers, upstreamExtraHeaders);
-      const transformedBody = await this.transformRequest(
-        model,
-        body,
-        upstreamStream,
-        credentials
-      );
+      const transformedBody = await this.transformRequest(model, body, upstreamStream, credentials);
 
       // Initialize retry counter for this URL
       if (!retryAttemptsByUrl[urlIndex]) {
@@ -474,7 +478,15 @@ export class AntigravityExecutor extends BaseExecutor {
         // For non-streaming clients, collect the SSE stream and return a synthetic
         // non-streaming Response so chatCore doesn't need to handle SSE conversion.
         if (!stream) {
-          return this.collectStreamToResponse(response, model, url, headers, transformedBody, log, signal);
+          return this.collectStreamToResponse(
+            response,
+            model,
+            url,
+            headers,
+            transformedBody,
+            log,
+            signal
+          );
         }
 
         return { response, url, headers, transformedBody };
